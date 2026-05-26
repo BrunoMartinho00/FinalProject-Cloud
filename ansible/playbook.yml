@@ -1,0 +1,63 @@
+---
+- name: Configurar Servidor e Correr Microsservicos
+  hosts: web
+  become: yes
+  tasks:
+    - name: Atualizar pacotes do sistema
+      apt:
+        update_cache: yes
+
+    - name: Instalar o Docker e Docker Compose
+      apt:
+        name: 
+          - docker.io
+          - docker-compose
+        state: present
+
+    - name: Garantir que o servico do Docker esta a correr
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Adicionar o utilizador ubuntu ao grupo docker
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Instalar rsync na maquina remota
+      apt:
+        name: rsync
+        state: present
+
+    - name: Copiar todo o projeto para a EC2
+      ansible.posix.synchronize:
+        src: ../
+        dest: /home/ubuntu/app/
+        recursive: yes
+        delete: yes
+        rsync_opts:
+          - "--exclude=ansible"      # NÃO copies a pasta ansible
+          - "--exclude=terraform"    # NÃO copies a pasta terraform
+          - "--exclude=.git"
+          - "--exclude=target"
+          - "--exclude=.mvn"
+          - "--exclude=.idea"
+          - "--exclude=.vscode"
+          - "--exclude=*.pem"
+          - "--exclude=docker-compose.yml"
+
+    - name: Garantir que o docker-compose.yml esta no destino
+      ansible.builtin.copy:
+        src: ../docker-compose.yml
+        dest: /home/ubuntu/app/docker-compose.yml
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Fazer Build e Correr os Contentores
+      become: yes
+      become_user: ubuntu
+      command: docker-compose up --build -d
+      args:
+        chdir: /home/ubuntu/app
