@@ -18,6 +18,8 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.h2.H2ConsoleAutoConfiguration
 
 server:
   port: 8081
