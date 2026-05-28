@@ -2,32 +2,30 @@ spring:
   application:
     name: product-service
   datasource:
-    url: jdbc:h2:mem:productsdb
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: 
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    url: jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
+    driver-class-name: org.postgresql.Driver
+    username: app_user
+    password: passwordSuperSegura123!
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
   
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_URL:localhost:9092}
     consumer:
       group-id: product-service-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: "*"
-        spring.json.type.mapping: orderCreated:pt.ulusofona.productservice.event.OrderCreatedEvent
+        # A magia está aqui: Traduzir a classe do order-service para a classe local
+        spring.json.type.mapping: pt.ulusofona.orderservice.event.OrderCreatedEvent:pt.ulusofona.productservice.event.OrderCreatedEvent
 
 server:
   port: 8082
@@ -67,4 +65,3 @@ logging:
     pt.ulusofona.productservice: DEBUG
     org.springframework.web: INFO
     org.springframework.kafka: INFO
-
