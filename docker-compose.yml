@@ -8,8 +8,9 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
       - SPRING_DATASOURCE_USERNAME=app_user
       - SPRING_DATASOURCE_PASSWORD=passwordSuperSegura123!
-      - CLOUD_AWS_SQS_ENDPOINT=https://sqs.us-east-1.amazonaws.com/612782034778/projeto-final-queue
-      - CLOUD_AWS_REGION=us-east-1
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
+      - SERVER_PORT=8083
+      - SERVER_ADDRESS=0.0.0.0
 
   product-service:
     build: ./product-service
@@ -18,23 +19,28 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
       - SPRING_DATASOURCE_USERNAME=app_user
       - SPRING_DATASOURCE_PASSWORD=passwordSuperSegura123!
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
+      - SERVER_PORT=8082
+      - SERVER_ADDRESS=0.0.0.0
 
   user-service:
     build: ./user-service
     restart: always
-    ports:
-      - "8081:8081"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
-      SPRING_DATASOURCE_USERNAME: app_user
-      SPRING_DATASOURCE_PASSWORD: "passwordSuperSegura123!"
-      SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
-      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
-      LOGGING_LEVEL_ROOT: DEBUG
-      SERVER_ERROR_INCLUDE_STACKTRACE: ALWAYS
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
+      - SPRING_DATASOURCE_USERNAME=app_user
+      - SPRING_DATASOURCE_PASSWORD=passwordSuperSegura123!
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
+      - SERVER_PORT=8081
+      - SERVER_ADDRESS=0.0.0.0
+      - LOGGING_LEVEL_ROOT=DEBUG
 
   api-gateway:
     build: ./api-gateway
     restart: always
     ports:
       - "80:8080"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service

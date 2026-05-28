@@ -2,27 +2,27 @@ spring:
   application:
     name: user-service
   datasource:
-    url: jdbc:h2:mem:usersdb
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: 
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    # URL do teu RDS (removido o H2)
+    url: jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
+    driver-class-name: org.postgresql.Driver
+    # O username e password serão injetados pelo docker-compose, 
+    # mas deixamos aqui como fallback ou para ambiente local
+    username: app_user
+    password: passwordSuperSegura123!
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update # Usamos update para não apagar a tua base de dados a cada restart
     show-sql: true
     properties:
       hibernate:
         format_sql: true
-  autoconfigure:
-    exclude: org.springframework.boot.autoconfigure.h2.H2ConsoleAutoConfiguration
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  # Removemos a configuração do H2 console
 
 server:
   port: 8081
+  address: 0.0.0.0
 
 management:
   endpoints:
@@ -58,4 +58,3 @@ logging:
     pt.ulusofona.userservice: DEBUG
     org.springframework.web: INFO
     org.springframework.kafka: INFO
-
