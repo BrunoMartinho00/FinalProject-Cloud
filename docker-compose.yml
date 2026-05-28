@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Zookeeper (Obrigatório para gerir o Kafka)
   zookeeper:
@@ -25,7 +23,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
   order-service:
-    build: ./order-service
+    image: app-order-service
     restart: always
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
@@ -39,7 +37,7 @@ services:
       - kafka
 
   product-service:
-    build: ./product-service
+    image: app-product-service
     restart: always
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
@@ -53,7 +51,7 @@ services:
       - kafka
 
   user-service:
-    build: ./user-service
+    image: app-user-service
     restart: always
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
@@ -65,7 +63,9 @@ services:
       - LOGGING_LEVEL_ROOT=DEBUG
 
   api-gateway:
-    build: ./api-gateway
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
     restart: always
     ports:
       - "80:8080"

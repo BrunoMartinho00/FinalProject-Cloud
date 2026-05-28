@@ -1,52 +1,58 @@
----
-- name: Configurar Servidor e Correr Microsservicos
-  hosts: web
+- name: Configurar Servidor de Produção
+  hosts: ec2
   become: yes
   tasks:
-    - name: Atualizar pacotes do sistema
+    - name: Atualizar pacotes
       apt:
         update_cache: yes
 
-    - name: Verificar estrutura de ficheiros no servidor
-      shell: ls -R /home/ubuntu/app
-      register: dir_content
-
-    - name: Mostrar estrutura (Debug)
-      debug:
-        var: dir_content.stdout_lines
-
-    - name: Instalar dependencias (Docker, Compose, Git)
+    - name: Instalar Docker e dependências
       apt:
-        name: [docker.io, docker-compose, git]
+        name: [docker.io, docker-compose-v2, python3-pip]
         state: present
 
-    - name: Garantir que o servico do Docker esta a correr
-      service:
-        name: docker
-        state: started
-        enabled: yes
+    - name: Configurar Swap (4GB)
+      shell: |
+        fallocate -l 4G /swapfile || true
+        chmod 600 /swapfile
+        mkswap /swapfile || true
+        swapon /swapfile || true
+      args:
+        executable: /bin/bash
 
-    - name: Adicionar o utilizador ubuntu ao grupo docker
-      user:
-        name: ubuntu
-        groups: docker
-        append: yes
-
-    - name: Criar pasta da app no servidor
+    - name: Garantir pasta da App
       file:
         path: /home/ubuntu/app
         state: directory
         owner: ubuntu
         group: ubuntu
 
-    - name: Copiar todo o projeto para a EC2 via shell
-      shell: rsync -av --exclude='.git' --exclude='.terraform' --exclude='ansible' --exclude='*.pem' ../ /home/ubuntu/app/
+    - name: Copiar código fonte para o servidor
+      synchronize:
+        src: ../../
+        dest: /home/ubuntu/app/
+        recursive: yes
+        delete: yes
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=terraform"
+          - "--exclude=ansible"
+          - "--exclude=target"
 
-    - name: Fazer Build e Correr os Contentores
-      become: yes
-      become_user: ubuntu
-      shell: |
-        # Encontra onde está o docker-compose e executa
-        cd /home/ubuntu/app
-        # Se ele criar uma subpasta, o comando abaixo vai encontrá-lo
-        find . -maxdepth 2 -name "docker-compose.yml" -execdir docker-compose up --build -d \;
+    - name: Ajustar permissões da pasta
+      file:
+        path: /home/ubuntu/app
+        owner: ubuntu
+        group: ubuntu
+        recurse: yes
+
+    - name: Dar permissão ao utilizador ubuntu para o Docker
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Arrancar a App
+      shell: DOCKER_BUILDKIT=0 docker compose up -d --build
+      args:
+        chdir: /home/ubuntu/app/
