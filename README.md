@@ -104,3 +104,103 @@ cd /home/ubuntu/app
 sudo docker-compose down
 sudo docker-compose up --build -d
 ```
+
+
+------------------
+
+Este repositório contém a infraestrutura e o código aplicacional para uma arquitetura de microsserviços na Cloud (AWS), cumprindo os requisitos da "Approach A - Reference Application Track".
+
+## 1. Estado Atual e Requisitos Implementados
+
+Até ao momento, o núcleo central da infraestrutura e da aplicação está 100% operacional, cobrindo os seguintes requisitos obrigatórios:
+
+* **Cloud Infrastructure (Req. 1):** Implementação de uma VPC customizada na AWS, subnets e Security Groups.
+* **Infrastructure as Code (Req. 2):** Todo o provisionamento (EC2 `t3.micro` e base de dados RDS PostgreSQL) está automatizado via Terraform.
+* **Containerization (Req. 3):** Os serviços e a infraestrutura de mensageria correm em contentores Docker via `docker-compose`.
+* **Distributed Architecture (Req. 4):** Arquitetura distribuída composta por um API Gateway e 3 microsserviços Java Spring Boot (User, Product, Order).
+* **Event-Driven Communication (Req. 5):** Integração do ecossistema Kafka (com Zookeeper) para comunicação assíncrona entre o `order-service` e o `product-service`.
+* **Persistence Layer (Req. 6):** Base de dados AWS RDS (PostgreSQL) centralizada na cloud.
+* **Configuration Management (Req. 7):** Utilização do Ansible para instalação de dependências (Docker), configuração de Swap na EC2 e arranque automático da aplicação.
+
+## 2. Principais Dificuldades e Soluções
+
+Durante o desenvolvimento e integração, foram ultrapassados vários desafios de engenharia, típicos de sistemas distribuídos:
+
+1. **O "Abraço da Morte" da Memória (Limitações do AWS Free Tier):**
+   * *Problema:* A instância `t3.micro` possui apenas 1GB de RAM. O arranque simultâneo de 4 aplicações Java, Kafka e Zookeeper esgotava a memória e bloqueava o servidor (*Connection refused* / quebra de SSH).
+   * *Solução:* Implementação de limites rigorosos de memória diretamente no `docker-compose.yml`. Foi injetada a variável `JAVA_OPTS=-Xms128m -Xmx256m` nos microsserviços e `KAFKA_HEAP_OPTS=-Xmx256M -Xms128M` no Kafka, garantindo estabilidade na máquina.
+2. **Falha no Build Local do Docker:**
+   * *Problema:* O Docker Compose tentava descarregar imagens inexistentes do Docker Hub (erro `pull access denied`) em vez de compilar o código fonte local.
+   * *Solução:* Adição da diretiva `build: context: ./<serviço>` e `dockerfile: Dockerfile` a cada serviço no ficheiro compose.
+3. **Bloqueio de Firewall após *Rebuild*:**
+   * *Problema:* Ao aplicar o princípio de infraestrutura imutável (destruir e recriar o ambiente com o Terraform), a nova base de dados RDS rejeitava conexões da nova instância EC2.
+   * *Solução:* Processo manual (a automatizar futuramente) de atualização das *Inbound rules* do Security Group da RDS na consola da AWS, permitindo a porta `5432` para o novo IP público `/32` da EC2.
+4. **Incompatibilidade do Modelo de Dados (Efeito Dominó):**
+   * *Problema:* O teste de criação de encomenda falhava porque o produto estava sem stock. Isto devia-se ao facto do JSON enviado usar a chave `"stock"`, enquanto a classe Java esperava `"stockQuantity"`.
+   * *Solução:* Correção do *payload* de teste, provando que a validação inter-serviços e a mensageria do Kafka estavam ativas e a funcionar corretamente.
+
+## 3. Como Iniciar e Testar o Projeto
+
+### Pré-requisitos
+* AWS CLI configurada localmente.
+* Terraform e Ansible instalados.
+* Chave SSH `projeto-final-key.pem` gerada e acessível.
+
+### Passo 1: Subir a Infraestrutura (Terraform)
+Na pasta `terraform`, executar:
+```bash
+terraform init
+terraform apply
+```
+*Anotar os outputs gerados: `ec2_public_ip` e `rds_endpoint`.*
+
+### Passo 2: Configurar Ligações Locais
+1. No ficheiro `docker-compose.yml` (raiz), atualizar a variável `SPRING_DATASOURCE_URL` com o novo *endpoint* do RDS.
+2. No ficheiro `ansible/inventory.ini`, substituir o IP alvo pelo novo `ec2_public_ip`.
+
+### Passo 3: Abrir a Firewall da Base de Dados
+Na consola da AWS (RDS > Security Groups), adicionar uma regra *Inbound* do tipo PostgreSQL para o IP da nova EC2 (`<EC2_IP>/32`).
+
+### Passo 4: Fazer o Deploy (Ansible)
+Na pasta `ansible`, executar:
+```bash
+ansible-playbook -i inventory.ini playbook.yml
+```
+*Aguardar 1 a 2 minutos após o final da execução para permitir o arranque completo da JVM (devido aos limites de RAM).*
+
+### Passo 5: Testar o Fluxo (Event-Driven)
+Executar os seguintes comandos no terminal para validar o ciclo completo da aplicação:
+
+**1. Criar Utilizador:**
+```bash
+curl -X POST http://<EC2_IP>/api/users \
+-H "Content-Type: application/json" \
+-d '{"name": "Bruno Martinho", "email": "bruno@ulht.pt"}'
+```
+
+**2. Criar Produto (com Stock):**
+```bash
+curl -X POST http://<EC2_IP>/api/products \
+-H "Content-Type: application/json" \
+-d '{"name": "Kit Arduino ESP32", "description": "Kit IoT", "price": 45.99, "stockQuantity": 10}'
+```
+
+**3. Criar Encomenda (Dispara evento no Kafka):**
+```bash
+curl -X POST http://<EC2_IP>/api/orders \
+-H "Content-Type: application/json" \
+-d '{
+  "userId": 1,
+  "items": [
+    {
+      "productId": 1,
+      "quantity": 2
+    }
+  ]
+}'
+```
+
+## 4. Trabalhos Futuros / O que falta
+Para a conclusão total do projeto, falta implementar:
+* **Automação de CI/CD (Req. 8):** Criação dos *workflows* no GitHub Actions para substituição da execução manual do Terraform e Ansible.
+* **Segurança de Credenciais (Req. 9):** Remoção da password em *plain text* da base de dados e passagem para variáveis de ambiente injetadas no momento do *deploy*.
