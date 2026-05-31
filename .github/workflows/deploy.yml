@@ -1,4 +1,4 @@
-name: Deploy Application
+name: Deploy Application (Ansible)
 
 on:
   push:
@@ -14,12 +14,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Inject DB Password (.env)
+        run: |
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" > .env
+
       - name: Setup SSH Key and Inventory
         run: |
+          # Criar pasta terraform e colocar lá a chave SSH
           mkdir -p terraform
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > terraform/projeto-final-key.pem
           chmod 600 terraform/projeto-final-key.pem
           
+          # Criar o inventory.ini com o IP secreto (AGORA COM O GRUPO [ec2])
           mkdir -p ansible
           echo "[ec2]" > ansible/inventory.ini
           echo "${{ secrets.EC2_IP }} ansible_user=ubuntu ansible_ssh_private_key_file=../terraform/projeto-final-key.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
