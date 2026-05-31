@@ -204,3 +204,24 @@ curl -X POST http://<EC2_IP>/api/orders \
 Para a conclusão total do projeto, falta implementar:
 * **Automação de CI/CD (Req. 8):** Criação dos *workflows* no GitHub Actions para substituição da execução manual do Terraform e Ansible.
 * **Segurança de Credenciais (Req. 9):** Remoção da password em *plain text* da base de dados e passagem para variáveis de ambiente injetadas no momento do *deploy*.
+
+
+## 🛠️ Últimas Implementações (Automação Total CI/CD)
+
+O pipeline de entrega contínua foi concluído com sucesso, unindo a infraestrutura e a configuração num único fluxo automatizado via **GitHub Actions**. As seguintes arquiteturas e correções foram implementadas:
+
+### 1. Gestão de Estado Profissional (Remote State)
+* O ficheiro de estado local do Terraform (`terraform.tfstate`) foi migrado para um **Bucket S3** da AWS. Isto garante que a infraestrutura é gerida de forma centralizada e segura, permitindo que o GitHub Actions saiba exatamente o que criar ou atualizar sem duplicar recursos.
+
+### 2. Automação do GitHub Actions (Pipeline Definitivo)
+* **Integração Terraform + Ansible:** O *workflow* `.github/workflows/deploy.yml` foi reescrito para executar a criação da infraestrutura (Terraform) e a instalação de software (Ansible) no mesmo fluxo de trabalho.
+* **Extração Dinâmica de IPs:** Configuração do `setup-terraform` com `terraform_wrapper: false` para garantir a extração limpa do IP público gerado pela AWS, injetando-o automaticamente no ficheiro de inventário (`inventory.ini`) do Ansible.
+* **Injeção de Segredos:** As credenciais da base de dados PostgreSQL são agora extraídas dos *GitHub Secrets* e injetadas de forma segura num ficheiro `.env` oculto antes de o código ser enviado para o servidor.
+
+### 3. Otimização de Recursos na Cloud (EC2)
+* **Upgrade de Instância:** A instância EC2 foi ajustada de `t3.micro` (1GB RAM) para `t3.small` (2GB RAM). Esta alteração foi necessária e feita via código para suportar a carga de compilação e execução simultânea dos 3 microsserviços Java (Spring Boot), Zookeeper e Apache Kafka sem causar bloqueios por falta de memória (OOM).
+
+### 4. Correções de Orquestração (Docker & Ansible)
+* **Resolução de Bloqueios SSH (File Descriptor Leak):** O *Playbook* do Ansible foi ajustado para redirecionar o *output* do comando de arranque do Docker para um ficheiro de log (`> docker_boot.log 2>&1`), evitando que o túnel SSH ficasse pendurado infinitamente.
+* **Correção de *Race Conditions*:** O `docker-compose.yml` foi atualizado com a flag `restart: always`. Isto garante que serviços dependentes (como o Kafka, que requer o Zookeeper para arrancar) se reiniciem automaticamente em caso de falha inicial, garantindo resiliência e estabilidade no arranque de toda a *stack*.
+* **Sincronização de Código:** Otimização do módulo `synchronize` do Ansible utilizando a variável `{{ playbook_dir }}/../` para garantir que o código fonte aterra nos caminhos corretos sem criar sub-pastas redundantes no servidor.
