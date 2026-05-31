@@ -20,14 +20,14 @@ jobs:
 
       - name: Setup SSH Key and Inventory
         run: |
-          # Recriar a pasta terraform e colocar lá a chave SSH em segurança
+          # Criar pasta terraform e colocar lá a chave SSH
           mkdir -p terraform
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > terraform/projeto-final-key.pem
           chmod 600 terraform/projeto-final-key.pem
           
-          # Criar o ficheiro inventory.ini dinamicamente com o IP do secret
+          # Criar o inventory.ini com o IP secreto (AGORA COM O GRUPO [ec2])
           mkdir -p ansible
-          echo "[webservers]" > ansible/inventory.ini
+          echo "[ec2]" > ansible/inventory.ini
           echo "${{ secrets.EC2_IP }} ansible_user=ubuntu ansible_ssh_private_key_file=../terraform/projeto-final-key.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
 
       - name: Install Ansible
