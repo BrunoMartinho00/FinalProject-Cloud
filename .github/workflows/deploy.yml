@@ -1,0 +1,41 @@
+name: Deploy Application (Ansible)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Run Ansible Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Inject DB Password (.env)
+        run: |
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" > .env
+
+      - name: Setup SSH Key and Inventory
+        run: |
+          # Recriar a pasta terraform e colocar lá a chave SSH em segurança
+          mkdir -p terraform
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > terraform/projeto-final-key.pem
+          chmod 600 terraform/projeto-final-key.pem
+          
+          # Criar o ficheiro inventory.ini dinamicamente com o IP do secret
+          mkdir -p ansible
+          echo "[webservers]" > ansible/inventory.ini
+          echo "${{ secrets.EC2_IP }} ansible_user=ubuntu ansible_ssh_private_key_file=../terraform/projeto-final-key.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
+
+      - name: Install Ansible
+        run: sudo apt-get update && sudo apt-get install -y ansible
+
+      - name: Run Ansible Playbook
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          cd ansible
+          ansible-playbook -i inventory.ini playbook.yml
