@@ -1,16 +1,18 @@
 services:
-  # Zookeeper (Obrigatório para gerir o Kafka)
+  # Zookeeper
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.2
+    restart: always # A MAGIA 1
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
 
-  # Kafka (A fila de mensagens)
+  # Kafka
   kafka:
     image: confluentinc/cp-kafka:7.3.2
+    restart: always # A MAGIA 2
     depends_on:
       - zookeeper
     ports:
@@ -33,7 +35,7 @@ services:
       - JAVA_OPTS=-Xms128m -Xmx256m
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
       - SPRING_DATASOURCE_USERNAME=app_user
-      - SPRING_DATASOURCE_PASSWORD=passwordSuperSegura123!
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD} # A MAGIA 3
       - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
       - SERVER_PORT=8083
       - SERVER_ADDRESS=0.0.0.0
@@ -51,7 +53,7 @@ services:
       - JAVA_OPTS=-Xms128m -Xmx256m
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
       - SPRING_DATASOURCE_USERNAME=app_user
-      - SPRING_DATASOURCE_PASSWORD=passwordSuperSegura123!
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
       - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
       - SERVER_PORT=8082
       - SERVER_ADDRESS=0.0.0.0
@@ -69,7 +71,7 @@ services:
       - JAVA_OPTS=-Xms128m -Xmx256m
       - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
       - SPRING_DATASOURCE_USERNAME=app_user
-      - SPRING_DATASOURCE_PASSWORD=passwordSuperSegura123!
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
       - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
       - SERVER_PORT=8081
       - SERVER_ADDRESS=0.0.0.0
