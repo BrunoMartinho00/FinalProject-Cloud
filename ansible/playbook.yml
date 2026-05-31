@@ -13,10 +13,12 @@
 
     - name: Configurar Swap (4GB)
       shell: |
-        fallocate -l 4G /swapfile || true
-        chmod 600 /swapfile
-        mkswap /swapfile || true
-        swapon /swapfile || true
+        if [ ! -f /swapfile ]; then
+          fallocate -l 4G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+        fi
       args:
         executable: /bin/bash
 
@@ -29,7 +31,7 @@
 
     - name: Copiar código fonte para o servidor
       synchronize:
-        src: ../../
+        src: ../
         dest: /home/ubuntu/app/
         recursive: yes
         delete: yes
@@ -53,6 +55,6 @@
         append: yes
 
     - name: Arrancar a App
-      shell: DOCKER_BUILDKIT=0 docker compose up -d --build
+      shell: docker compose up -d --build > docker_boot.log 2>&1
       args:
         chdir: /home/ubuntu/app/
