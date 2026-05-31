@@ -31,7 +31,7 @@
 
     - name: Copiar código fonte para o servidor
       synchronize:
-        src: ../
+        src: "{{ playbook_dir }}/../"
         dest: /home/ubuntu/app/
         recursive: yes
         delete: yes
