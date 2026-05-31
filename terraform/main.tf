@@ -5,6 +5,13 @@ terraform {
       version = "~> 5.0"
     }
   }
+  
+  # AQUI ESTÁ A NOVIDADE: O COFRE NA CLOUD
+  backend "s3" {
+    bucket = "bruno-finalproject-tfstate-123" # Substitui pelo nome único que escolheres
+    key    = "prod/terraform.tfstate"
+    region = "us-east-1"
+  }
 }
 
 provider "aws" {

@@ -1,4 +1,4 @@
-name: Deploy Application (Ansible)
+name: Deploy Infra & Application
 
 on:
   push:
@@ -7,28 +7,46 @@ on:
 
 jobs:
   deploy:
-    name: Run Ansible Deploy
+    name: Terraform Apply & Ansible Deploy
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Inject DB Password (.env)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init & Apply
         run: |
-          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" > .env
+          cd terraform
+          terraform init
+          terraform apply -auto-approve
+        
+      - name: Extract EC2 IP from Terraform
+        id: tf_output
+        run: |
+          cd terraform
+          EC2_IP=$(terraform output -raw ec2_public_ip)
+          echo "ec2_ip=$EC2_IP" >> $GITHUB_ENV
 
       - name: Setup SSH Key and Inventory
         run: |
-          # Criar pasta terraform e colocar lá a chave SSH
           mkdir -p terraform
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > terraform/projeto-final-key.pem
           chmod 600 terraform/projeto-final-key.pem
           
-          # Criar o inventory.ini com o IP secreto (AGORA COM O GRUPO [ec2])
+          # Criar o inventory.ini com o NOVO IP extraído do Terraform
           mkdir -p ansible
           echo "[ec2]" > ansible/inventory.ini
-          echo "${{ secrets.EC2_IP }} ansible_user=ubuntu ansible_ssh_private_key_file=../terraform/projeto-final-key.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
+          echo "${{ env.ec2_ip }} ansible_user=ubuntu ansible_ssh_private_key_file=../terraform/projeto-final-key.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
 
       - name: Install Ansible
         run: sudo apt-get update && sudo apt-get install -y ansible
@@ -38,4 +56,6 @@ jobs:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
           cd ansible
+          # Pausa de 30s para garantir que a EC2 recém-criada ligou o serviço SSH
+          sleep 30 
           ansible-playbook -i inventory.ini playbook.yml
