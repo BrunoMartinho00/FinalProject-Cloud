@@ -1,0 +1,45 @@
+name: Destroy Infrastructure
+
+# O 'workflow_dispatch' é a magia que cria o botão manual no GitHub
+on:
+  workflow_dispatch: 
+
+jobs:
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    
+    # Se usas autenticação OIDC para a AWS, precisas destas permissões:
+    permissions:
+      id-token: write
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # IMPORTANTE: Copia este passo EXATAMENTE igual ao que tens no teu deploy.yml
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }} # Ou usa o AWS_ACCESS_KEY_ID se for o caso
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve
+        # Passa as variáveis que o teu Terraform exige, igual ao deploy.yml
+        env:
+          TF_VAR_aws_region: "us-east-1"
+          TF_VAR_key_name: "projeto-final-key"
+          TF_VAR_db_username: ${{ secrets.DB_USERNAME }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
