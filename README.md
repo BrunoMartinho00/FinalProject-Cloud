@@ -225,3 +225,33 @@ O pipeline de entrega contínua foi concluído com sucesso, unindo a infraestrut
 * **Resolução de Bloqueios SSH (File Descriptor Leak):** O *Playbook* do Ansible foi ajustado para redirecionar o *output* do comando de arranque do Docker para um ficheiro de log (`> docker_boot.log 2>&1`), evitando que o túnel SSH ficasse pendurado infinitamente.
 * **Correção de *Race Conditions*:** O `docker-compose.yml` foi atualizado com a flag `restart: always`. Isto garante que serviços dependentes (como o Kafka, que requer o Zookeeper para arrancar) se reiniciem automaticamente em caso de falha inicial, garantindo resiliência e estabilidade no arranque de toda a *stack*.
 * **Sincronização de Código:** Otimização do módulo `synchronize` do Ansible utilizando a variável `{{ playbook_dir }}/../` para garantir que o código fonte aterra nos caminhos corretos sem criar sub-pastas redundantes no servidor.
+
+
+
+## 1. Modularização da Infraestrutura (Terraform)
+A arquitetura monolítica foi refatorizada numa estrutura de diretórios baseada em módulos, adotando as melhores práticas da indústria para *Infrastructure as Code* (IaC).
+
+* **Módulo VPC (`modules/vpc`):** Criação de uma rede isolada (`10.0.0.0/16`) com sub-redes públicas para a camada de computação e sub-redes privadas dedicadas à camada de persistência de dados.
+* **Módulo Security (`modules/security`):** Configuração de *Security Groups* com regras de firewall rigorosas. Tráfego HTTP e SSH permitido para a instância EC2; acesso à base de dados PostgreSQL estritamente limitado ao IP interno da EC2.
+* **Módulo Compute (`modules/compute`):** Provisionamento dinâmico da instância EC2 (Ubuntu 22.04, t3.small) na sub-rede pública, com alocação otimizada de 20GB no volume EBS e exportação dinâmica do IP público via ficheiro `outputs.tf`.
+* **Módulo Database (`modules/database`):** Implementação de uma base de dados RDS PostgreSQL protegida da internet (`publicly_accessible = false`), alojada de forma segura nas sub-redes privadas.
+
+## 2. Auditoria e Limpeza da AWS
+Resolução de conflitos de estado no Terraform causados por recursos residuais de testes anteriores. 
+* Remoção forçada da instância de base de dados antiga e do respetivo `db-subnet-group` via AWS CLI no Pop!_OS, garantindo a idempotência do novo pipeline.
+* Comandos de *troubleshooting* executados:
+
+```bash
+aws rds delete-db-instance --db-instance-identifier projeto-final-db --skip-final-snapshot --region us-east-1
+aws rds delete-db-subnet-group --db-subnet-group-name projeto-final-db-subnet-group --region us-east-1
+```
+
+## 3. Implementação do "Tear Down" Automatizado
+* Criação do *workflow* `.github/workflows/destroy.yml`.
+* Configuração do gatilho `workflow_dispatch` para gerar um botão de execução estritamente manual no GitHub Actions.
+* Este *workflow* garante uma eliminação limpa e controlada de todos os recursos da AWS num ambiente de testes, otimizando custos e preparando o ambiente a zeros para a defesa do projeto.
+
+## 4. Otimização do Pipeline de CI/CD
+Adoção de estratégias de controlo de execução para evitar *deployments* desnecessários na AWS:
+* Configuração da tag `[skip ci]` na mensagem de *commit* para ignorar *builds* de rotina.
+* Planeamento da diretiva `paths-ignore` no ficheiro `deploy.yml` para isolar alterações em documentação (`docs/**`, `README.md`), assegurando que o pipeline arranca obrigatoriamente (conforme requisitos do projeto) apenas quando há alterações no código-fonte ou na infraestrutura.
