@@ -1,193 +1,71 @@
-# Documentação Técnica e Arquitetural - Projeto Final Cloud
+# Projeto Final - Cloud Information Systems
 
-## 1. Visão Geral da Infraestrutura
+**Autor:** Bruno Martinho
+**Track:** Approach A (Reference Application)
 
-O ambiente de produção foi aprovisionado na Amazon Web Services (AWS) adotando uma arquitetura de microsserviços. A camada de computação é assegurada por uma instância EC2 a correr Ubuntu 22.04 LTS, operando como um *host* Docker. A camada de persistência de dados foi delegada para um serviço gerido, o Amazon RDS (PostgreSQL), garantindo separação de responsabilidades (Compute vs. Storage) e maior resiliência.
+## 1. Visão Geral
+Este repositório contém a infraestrutura como código (IaC), pipelines de automação e o código-fonte de uma arquitetura *Cloud-Native* baseada em microsserviços. O sistema foi integralmente provisionado na Amazon Web Services (AWS) com foco em resiliência, segurança e automação contínua. 
 
-### Especificações Técnicas Atuais
-* **Compute:** Instância AWS EC2 `t3.micro` (2 vCPUs, 1 GB RAM física).
-* **Networking (VPC):** `vpc-07b98ad6cecd321b8` alocada na sub-rede pública `subnet-08c5a016ccb7bca7f` (us-east-1a).
-* **Endereçamento:** Elastic IP Público estático (`52.201.94.165`).
-* **Storage/Memória Virtual:** 8 GB EBS (Root Volume) + 2 GB Swap File (Alocação manual).
-* **Orquestração:** Docker Engine com Docker Compose v2.
+O projeto adota a separação de responsabilidades (*Compute* vs. *Storage*), utilizando uma instância EC2 para orquestração de contentores (Docker) e um serviço gerido Amazon RDS para persistência relacional, com comunicação assíncrona orientada a eventos gerida por Apache Kafka.
 
----
+### Tech Stack
+* **Cloud Provider:** AWS (Custom VPC, EC2, RDS PostgreSQL, Internet Gateway)
+* **Infrastructure as Code (IaC):** Terraform (Módulos e Remote State via S3)
+* **Configuration Management:** Ansible
+* **Containerização:** Docker & Docker Compose v2
+* **CI/CD:** GitHub Actions (OpenID Connect - OIDC)
+* **Camada Aplicacional:** Java 17, Spring Boot, Apache Kafka, Zookeeper
 
-## 2. Diário de Bordo: Desafios, Diagnósticos e Resoluções
+## 2. Organização do Repositório
 
-Durante a fase de *deployment* e integração contínua, foram identificados e mitigados três bloqueios arquiteturais críticos. Abaixo detalha-se a análise de causa raiz (Root Cause Analysis) para cada incidente.
+O repositório está estruturado segundo as melhores práticas para separar o código aplicacional da gestão de infraestrutura:
 
-### 2.1. Isolamento de Rede e Alocação Dinâmica CGNAT
-**Descrição do Incidente:**
-Após uma interrupção intencional da instância EC2 (*Stop/Start*) para otimização de custos, o servidor ficou inacessível via SSH (Porta 22) e deixou de responder a pacotes ICMP (Ping), resultando em 100% *packet loss*.
-
-**Diagnóstico (Root Cause Analysis):**
-Na AWS, instâncias lançadas sem um Elastic IP perdem o seu endereço IPv4 público aquando do encerramento. No reinício, a infraestrutura da AWS atribuiu um endereço IP interno da gama *Carrier-Grade NAT* (`100.55.6.211`). Este IP pertence a um espaço de endereçamento partilhado usado pela AWS para colmatar a escassez de IPv4 e não é diretamente roteável a partir da Internet pública. Adicionalmente, verificou-se a integridade das *Route Tables* da VPC.
-
-**Resolução Técnica:**
-1. Provisionamento de um **Elastic IP** e associação direta à interface de rede (ENI) da instância `i-04d27c7969046909d`.
-2. Validação da *Route Table* associada à sub-rede pública (`rtb-09a4b8753a5a1e303`).
-3. Confirmação da existência da rota `0.0.0.0/0` apontada para o *Internet Gateway* (`igw`), garantindo a capacidade de tráfego bidirecional.
-
-### 2.2. Exaustão de Recursos de Hardware (OOM Killer)
-**Descrição do Incidente:**
-A execução do comando de orquestração `docker-compose up -d` resultava num congelamento global do Sistema Operativo convidado (Ubuntu). O *daemon* do SSH era terminado abruptamente e a instância tornava-se inoperável, exigindo um *Hard Reboot* via consola AWS.
-
-**Diagnóstico (Root Cause Analysis):**
-A instância `t3.micro` dispõe de apenas 1 GB de memória RAM física. A arquitetura da aplicação exige a inicialização concorrente de quatro microsserviços baseados em Java 17 e Spring Boot (`api-gateway`, `user-service`, `product-service`, `order-service`). A *Java Virtual Machine* (JVM), ao inicializar o ecossistema Spring (incluindo o Tomcat embebido e o contexto JPA/Hibernate), aloca agressivamente memória. A soma das reservas de memória excedeu a RAM física disponível. O *kernel* do Linux, como mecanismo de autodefesa, invocou o **Out-Of-Memory (OOM) Killer**, terminando os processos mais pesados, incluindo o próprio `sshd` e o `dockerd`.
-
-**Resolução Técnica:**
-Como a infraestrutura AWS em modo *Free Tier* restringe o *upgrade* para instâncias com mais RAM (ex: `t3.small`), a solução incidiu na gestão de memória do Sistema Operativo, criando espaço de paginação (*Swap Space*).
-
-```bash
-# Criação de um bloco contíguo de 2GB no disco EBS
-sudo fallocate -l 2G /swapfile
-
-# Configuração de permissões estritas por motivos de segurança
-sudo chmod 600 /swapfile
-
-# Formatação e ativação do espaço de paginação
-sudo mkswap /swapfile
-sudo swapon /swapfile
-```
-Esta intervenção permitiu que o *kernel* transferisse páginas de memória inativas (como processos em *background*) para o disco SSD, libertando a RAM física crucial para a inicialização das JVMs.
-
-### 2.3. Conflito de Dialeto ORM e Conectividade JDBC
-**Descrição do Incidente:**
-Com a memória estabilizada, os contentores iniciaram, contudo o `user-service` e o `product-service` falhavam sistematicamente (código de saída Docker `Exited 1`). Os logs expuseram a exceção: `java.lang.RuntimeException: Driver org.h2.Driver claims to not accept jdbcUrl, jdbc:postgresql://...`
-
-**Diagnóstico (Root Cause Analysis):**
-Apesar de a conexão de rede TCP entre a instância EC2 e a base de dados AWS RDS na porta `5432` ter sido validada com sucesso através do utilitário `netcat` (`nc -zv`), a camada de persistência (*Hibernate*) estava mal configurada. Sem instruções explícitas, o Spring Boot ativou o perfil de *fallback* para a base de dados em memória (H2), cujo *driver* não é capaz de interpretar o protocolo `jdbc:postgresql://`.
-
-**Resolução Técnica:**
-Foi necessário aplicar o padrão *12-Factor App*, externalizando as configurações de ambiente para o ficheiro de orquestração do Docker, anulando as predefinições locais compiladas no `.jar`.
-
-As variáveis de ambiente injetadas no `docker-compose.yml` foram:
-| Variável de Ambiente | Valor Atribuído | Propósito |
-| :--- | :--- | :--- |
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://<rds-endpoint>:5432/postgres` | Endpoint remoto da base de dados. |
-| `SPRING_DATASOURCE_DRIVER_CLASS_NAME` | `org.postgresql.Driver` | Força a utilização do driver nativo do Postgres. |
-| `SPRING_JPA_DATABASE_PLATFORM` | `org.hibernate.dialect.PostgreSQLDialect` | Instrui o Hibernate sobre o dialeto SQL a gerar. |
-
-Após a reconstrução das imagens (`docker-compose up --build -d`), os serviços estabeleceram com sucesso o *pool* de conexões (HikariCP) com a base de dados RDS.
-
----
-
-## 3. Topologia e Port Map do Ambiente Operacional
-
-A infraestrutura foi desenhada para limitar a superfície de ataque. Apenas o API Gateway tem exposição pública na porta 80, atuando como *Reverse Proxy* e *Load Balancer* interno para os restantes microsserviços.
-
-| Contentor / Serviço | Runtime | Bind Mount (Host:Container) | Rede Docker |
-| :--- | :--- | :--- | :--- |
-| **app_api-gateway_1** | Java 17 | `0.0.0.0:80 -> 8080/tcp` | `app_default` |
-| **app_user-service_1** | Java 17 | N/A (Apenas interno 8080) | `app_default` |
-| **app_product-service_1** | Java 17 | N/A (Apenas interno 8080) | `app_default` |
-| **app_order-service_1** | Java 17 | N/A (Apenas interno 8080) | `app_default` |
-
----
-
-## 4. Pipeline de Sincronização de Código (Deployment)
-
-Para a entrega contínua do código local para o ambiente de produção, estabeleceu-se um fluxo baseado em SSH e sincronização diferencial (`rsync`), otimizando a largura de banda e o tempo de *deploy*.
-
-```bash
-# 1. Empacotamento local (Build)
-mvn clean package -DskipTests
-
-# 2. Sincronização diferencial para a Cloud
-rsync -av -e "ssh -i terraform/projeto-final-key.pem" \
---exclude='.git' --exclude='.terraform' --exclude='*.pem' \
-./ ubuntu@52.201.94.165:/home/ubuntu/app/
-
-# 3. Recreação da infraestrutura (Rolling Update)
-cd /home/ubuntu/app
-sudo docker-compose down
-sudo docker-compose up --build -d
+```text
+├── .github/workflows/   # Pipelines de CI/CD (Deploy automático e Destroy)
+├── ansible/             # Playbooks e inventário para configuração da EC2
+├── docs/                # Documentação técnica detalhada (Arquitetura, Segurança, etc.)
+├── api-gateway/         # Reverse Proxy e ponto único de entrada público (Porta 80)
+├── order-service/       # Microsserviço de orquestração de encomendas (Producer Kafka)
+├── product-service/     # Microsserviço de catálogo e gestão de stock (Consumer Kafka)
+├── user-service/        # Microsserviço de gestão de perfis e identidades de clientes
+├── terraform/           # Código de provisionamento IaC (Módulos: vpc, compute, db, security)
+├── docker-compose.yml   # Orquestração local e de produção dos contentores
+└── README.md            # Este documento
 ```
 
+## 3. Documentação Técnica
 
-------------------
+Toda a documentação exigida para a defesa do projeto encontra-se na pasta `docs/`. É fortemente recomendado seguir a ordem de leitura abaixo para uma compreensão total da topologia e das decisões de engenharia:
 
-Este repositório contém a infraestrutura e o código aplicacional para uma arquitetura de microsserviços na Cloud (AWS), cumprindo os requisitos da "Approach A - Reference Application Track".
+1. [**Arquitetura e Fluxo de Dados** (`docs/architecture.md`)](./docs/architecture.md)
+2. [**Segurança e IAM** (`docs/security.md`)](./docs/security.md)
+3. [**Guia de Configuração e Pré-requisitos** (`docs/setup.md`)](./docs/setup.md)
+4. [**Guia de Deployment Passo-a-Passo** (`docs/deployment.md`)](./docs/deployment.md)
+5. [**Limitações e Trabalhos Futuros** (`docs/limitations.md`)](./docs/limitations.md)
 
-## 1. Estado Atual e Requisitos Implementados
+## 4. Como Executar e Testar
 
-Até ao momento, o núcleo central da infraestrutura e da aplicação está 100% operacional, cobrindo os seguintes requisitos obrigatórios:
+O processo de *deployment* é totalmente automatizado via GitHub Actions a cada *push* para a *branch* `main`. Para instruções sobre como fazer o *deploy* manualmente do zero, consulte o [Guia de Deployment](./docs/deployment.md).
 
-* **Cloud Infrastructure (Req. 1):** Implementação de uma VPC customizada na AWS, subnets e Security Groups.
-* **Infrastructure as Code (Req. 2):** Todo o provisionamento (EC2 `t3.micro` e base de dados RDS PostgreSQL) está automatizado via Terraform.
-* **Containerization (Req. 3):** Os serviços e a infraestrutura de mensageria correm em contentores Docker via `docker-compose`.
-* **Distributed Architecture (Req. 4):** Arquitetura distribuída composta por um API Gateway e 3 microsserviços Java Spring Boot (User, Product, Order).
-* **Event-Driven Communication (Req. 5):** Integração do ecossistema Kafka (com Zookeeper) para comunicação assíncrona entre o `order-service` e o `product-service`.
-* **Persistence Layer (Req. 6):** Base de dados AWS RDS (PostgreSQL) centralizada na cloud.
-* **Configuration Management (Req. 7):** Utilização do Ansible para instalação de dependências (Docker), configuração de Swap na EC2 e arranque automático da aplicação.
+Após o sistema estar online, o *API Gateway* fica acessível via HTTP na porta 80 da instância EC2. Pode testar o fluxo de comunicação síncrono e assíncrono (*Event-Driven*) utilizando os seguintes comandos no terminal:
 
-## 2. Principais Dificuldades e Soluções
-
-Durante o desenvolvimento e integração, foram ultrapassados vários desafios de engenharia, típicos de sistemas distribuídos:
-
-1. **O "Abraço da Morte" da Memória (Limitações do AWS Free Tier):**
-   * *Problema:* A instância `t3.micro` possui apenas 1GB de RAM. O arranque simultâneo de 4 aplicações Java, Kafka e Zookeeper esgotava a memória e bloqueava o servidor (*Connection refused* / quebra de SSH).
-   * *Solução:* Implementação de limites rigorosos de memória diretamente no `docker-compose.yml`. Foi injetada a variável `JAVA_OPTS=-Xms128m -Xmx256m` nos microsserviços e `KAFKA_HEAP_OPTS=-Xmx256M -Xms128M` no Kafka, garantindo estabilidade na máquina.
-2. **Falha no Build Local do Docker:**
-   * *Problema:* O Docker Compose tentava descarregar imagens inexistentes do Docker Hub (erro `pull access denied`) em vez de compilar o código fonte local.
-   * *Solução:* Adição da diretiva `build: context: ./<serviço>` e `dockerfile: Dockerfile` a cada serviço no ficheiro compose.
-3. **Bloqueio de Firewall após *Rebuild*:**
-   * *Problema:* Ao aplicar o princípio de infraestrutura imutável (destruir e recriar o ambiente com o Terraform), a nova base de dados RDS rejeitava conexões da nova instância EC2.
-   * *Solução:* Processo manual (a automatizar futuramente) de atualização das *Inbound rules* do Security Group da RDS na consola da AWS, permitindo a porta `5432` para o novo IP público `/32` da EC2.
-4. **Incompatibilidade do Modelo de Dados (Efeito Dominó):**
-   * *Problema:* O teste de criação de encomenda falhava porque o produto estava sem stock. Isto devia-se ao facto do JSON enviado usar a chave `"stock"`, enquanto a classe Java esperava `"stockQuantity"`.
-   * *Solução:* Correção do *payload* de teste, provando que a validação inter-serviços e a mensageria do Kafka estavam ativas e a funcionar corretamente.
-
-## 3. Como Iniciar e Testar o Projeto
-
-### Pré-requisitos
-* AWS CLI configurada localmente.
-* Terraform e Ansible instalados.
-* Chave SSH `projeto-final-key.pem` gerada e acessível.
-
-### Passo 1: Subir a Infraestrutura (Terraform)
-Na pasta `terraform`, executar:
+**1. Criar um Utilizador:**
 ```bash
-terraform init
-terraform apply
-```
-*Anotar os outputs gerados: `ec2_public_ip` e `rds_endpoint`.*
-
-### Passo 2: Configurar Ligações Locais
-1. No ficheiro `docker-compose.yml` (raiz), atualizar a variável `SPRING_DATASOURCE_URL` com o novo *endpoint* do RDS.
-2. No ficheiro `ansible/inventory.ini`, substituir o IP alvo pelo novo `ec2_public_ip`.
-
-### Passo 3: Abrir a Firewall da Base de Dados
-Na consola da AWS (RDS > Security Groups), adicionar uma regra *Inbound* do tipo PostgreSQL para o IP da nova EC2 (`<EC2_IP>/32`).
-
-### Passo 4: Fazer o Deploy (Ansible)
-Na pasta `ansible`, executar:
-```bash
-ansible-playbook -i inventory.ini playbook.yml
-```
-*Aguardar 1 a 2 minutos após o final da execução para permitir o arranque completo da JVM (devido aos limites de RAM).*
-
-### Passo 5: Testar o Fluxo (Event-Driven)
-Executar os seguintes comandos no terminal para validar o ciclo completo da aplicação:
-
-**1. Criar Utilizador:**
-```bash
-curl -X POST http://<EC2_IP>/api/users \
+curl -X POST http://<EC2_PUBLIC_IP>/api/users \
 -H "Content-Type: application/json" \
 -d '{"name": "Bruno Martinho", "email": "bruno@ulht.pt"}'
 ```
 
-**2. Criar Produto (com Stock):**
+**2. Adicionar um Produto ao Catálogo (com Stock Inicial):**
 ```bash
-curl -X POST http://<EC2_IP>/api/products \
+curl -X POST http://<EC2_PUBLIC_IP>/api/products \
 -H "Content-Type: application/json" \
 -d '{"name": "Kit Arduino ESP32", "description": "Kit IoT", "price": 45.99, "stockQuantity": 10}'
 ```
 
-**3. Criar Encomenda (Dispara evento no Kafka):**
+**3. Criar uma Encomenda (Despoleta evento Kafka para o Product Service):**
 ```bash
-curl -X POST http://<EC2_IP>/api/orders \
+curl -X POST http://<EC2_PUBLIC_IP>/api/orders \
 -H "Content-Type: application/json" \
 -d '{
   "userId": 1,
@@ -199,59 +77,4 @@ curl -X POST http://<EC2_IP>/api/orders \
   ]
 }'
 ```
-
-## 4. Trabalhos Futuros / O que falta
-Para a conclusão total do projeto, falta implementar:
-* **Automação de CI/CD (Req. 8):** Criação dos *workflows* no GitHub Actions para substituição da execução manual do Terraform e Ansible.
-* **Segurança de Credenciais (Req. 9):** Remoção da password em *plain text* da base de dados e passagem para variáveis de ambiente injetadas no momento do *deploy*.
-
-
-## 🛠️ Últimas Implementações (Automação Total CI/CD)
-
-O pipeline de entrega contínua foi concluído com sucesso, unindo a infraestrutura e a configuração num único fluxo automatizado via **GitHub Actions**. As seguintes arquiteturas e correções foram implementadas:
-
-### 1. Gestão de Estado Profissional (Remote State)
-* O ficheiro de estado local do Terraform (`terraform.tfstate`) foi migrado para um **Bucket S3** da AWS. Isto garante que a infraestrutura é gerida de forma centralizada e segura, permitindo que o GitHub Actions saiba exatamente o que criar ou atualizar sem duplicar recursos.
-
-### 2. Automação do GitHub Actions (Pipeline Definitivo)
-* **Integração Terraform + Ansible:** O *workflow* `.github/workflows/deploy.yml` foi reescrito para executar a criação da infraestrutura (Terraform) e a instalação de software (Ansible) no mesmo fluxo de trabalho.
-* **Extração Dinâmica de IPs:** Configuração do `setup-terraform` com `terraform_wrapper: false` para garantir a extração limpa do IP público gerado pela AWS, injetando-o automaticamente no ficheiro de inventário (`inventory.ini`) do Ansible.
-* **Injeção de Segredos:** As credenciais da base de dados PostgreSQL são agora extraídas dos *GitHub Secrets* e injetadas de forma segura num ficheiro `.env` oculto antes de o código ser enviado para o servidor.
-
-### 3. Otimização de Recursos na Cloud (EC2)
-* **Upgrade de Instância:** A instância EC2 foi ajustada de `t3.micro` (1GB RAM) para `t3.small` (2GB RAM). Esta alteração foi necessária e feita via código para suportar a carga de compilação e execução simultânea dos 3 microsserviços Java (Spring Boot), Zookeeper e Apache Kafka sem causar bloqueios por falta de memória (OOM).
-
-### 4. Correções de Orquestração (Docker & Ansible)
-* **Resolução de Bloqueios SSH (File Descriptor Leak):** O *Playbook* do Ansible foi ajustado para redirecionar o *output* do comando de arranque do Docker para um ficheiro de log (`> docker_boot.log 2>&1`), evitando que o túnel SSH ficasse pendurado infinitamente.
-* **Correção de *Race Conditions*:** O `docker-compose.yml` foi atualizado com a flag `restart: always`. Isto garante que serviços dependentes (como o Kafka, que requer o Zookeeper para arrancar) se reiniciem automaticamente em caso de falha inicial, garantindo resiliência e estabilidade no arranque de toda a *stack*.
-* **Sincronização de Código:** Otimização do módulo `synchronize` do Ansible utilizando a variável `{{ playbook_dir }}/../` para garantir que o código fonte aterra nos caminhos corretos sem criar sub-pastas redundantes no servidor.
-
-
-
-## 1. Modularização da Infraestrutura (Terraform)
-A arquitetura monolítica foi refatorizada numa estrutura de diretórios baseada em módulos, adotando as melhores práticas da indústria para *Infrastructure as Code* (IaC).
-
-* **Módulo VPC (`modules/vpc`):** Criação de uma rede isolada (`10.0.0.0/16`) com sub-redes públicas para a camada de computação e sub-redes privadas dedicadas à camada de persistência de dados.
-* **Módulo Security (`modules/security`):** Configuração de *Security Groups* com regras de firewall rigorosas. Tráfego HTTP e SSH permitido para a instância EC2; acesso à base de dados PostgreSQL estritamente limitado ao IP interno da EC2.
-* **Módulo Compute (`modules/compute`):** Provisionamento dinâmico da instância EC2 (Ubuntu 22.04, t3.small) na sub-rede pública, com alocação otimizada de 20GB no volume EBS e exportação dinâmica do IP público via ficheiro `outputs.tf`.
-* **Módulo Database (`modules/database`):** Implementação de uma base de dados RDS PostgreSQL protegida da internet (`publicly_accessible = false`), alojada de forma segura nas sub-redes privadas.
-
-## 2. Auditoria e Limpeza da AWS
-Resolução de conflitos de estado no Terraform causados por recursos residuais de testes anteriores. 
-* Remoção forçada da instância de base de dados antiga e do respetivo `db-subnet-group` via AWS CLI no Pop!_OS, garantindo a idempotência do novo pipeline.
-* Comandos de *troubleshooting* executados:
-
-```bash
-aws rds delete-db-instance --db-instance-identifier projeto-final-db --skip-final-snapshot --region us-east-1
-aws rds delete-db-subnet-group --db-subnet-group-name projeto-final-db-subnet-group --region us-east-1
-```
-
-## 3. Implementação do "Tear Down" Automatizado
-* Criação do *workflow* `.github/workflows/destroy.yml`.
-* Configuração do gatilho `workflow_dispatch` para gerar um botão de execução estritamente manual no GitHub Actions.
-* Este *workflow* garante uma eliminação limpa e controlada de todos os recursos da AWS num ambiente de testes, otimizando custos e preparando o ambiente a zeros para a defesa do projeto.
-
-## 4. Otimização do Pipeline de CI/CD
-Adoção de estratégias de controlo de execução para evitar *deployments* desnecessários na AWS:
-* Configuração da tag `[skip ci]` na mensagem de *commit* para ignorar *builds* de rotina.
-* Planeamento da diretiva `paths-ignore` no ficheiro `deploy.yml` para isolar alterações em documentação (`docs/**`, `README.md`), assegurando que o pipeline arranca obrigatoriamente (conforme requisitos do projeto) apenas quando há alterações no código-fonte ou na infraestrutura.
+*Nota: A criação da encomenda atinge a base de dados do `order-service` de forma síncrona, e de seguida uma mensagem assíncrona é consumida pelo `product-service` via Kafka para subtrair a quantidade requerida ao stock global.*
