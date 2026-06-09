@@ -2,23 +2,19 @@ spring:
   application:
     name: user-service
   datasource:
-    # URL do teu RDS (removido o H2)
     url: jdbc:postgresql://projeto-final-db.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
     driver-class-name: org.postgresql.Driver
-    # O username e password serão injetados pelo docker-compose, 
-    # mas deixamos aqui como fallback ou para ambiente local
     username: app_user
     password: passwordSuperSegura123!
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: update # Usamos update para não apagar a tua base de dados a cada restart
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
-  # Removemos a configuração do H2 console
 
 server:
   port: 8081

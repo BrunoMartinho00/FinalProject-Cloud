@@ -24,7 +24,6 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: "*"
-        # A magia está aqui: Traduzir a classe do order-service para a classe local
         spring.json.type.mapping: pt.ulusofona.orderservice.event.OrderCreatedEvent:pt.ulusofona.productservice.event.OrderCreatedEvent
 
 server:

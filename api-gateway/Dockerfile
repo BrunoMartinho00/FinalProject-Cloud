@@ -8,6 +8,5 @@ RUN mvn clean package -DskipTests
 # Stage 2: Rodar
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-# AQUI ESTÁ A CORREÇÃO: Copia o jar do stage 'build'
 COPY --from=build /app/target/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
