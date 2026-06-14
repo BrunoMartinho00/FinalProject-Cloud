@@ -5,6 +5,8 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # Guardar o ficheiro de estado. Não fica local, mas sim no aws
   backend "s3" {
     bucket = "bruno-finalproject-tfstate-123"
     key    = "prod/terraform.tfstate"
@@ -22,7 +24,7 @@ module "vpc" {
 
 module "security" {
   source = "./modules/security"
-  vpc_id = module.vpc.vpc_id
+  vpc_id = module.vpc.vpc_id # passa o vpc id
 }
 
 module "compute" {
