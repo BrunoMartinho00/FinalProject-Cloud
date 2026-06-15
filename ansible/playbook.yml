@@ -1,16 +1,19 @@
 - name: Configurar Servidor de Produção
-  hosts: ec2
-  become: yes
+  hosts: ec2 # Grupo de maquinas definido no inventory.ini
+  become: yes # sudo
   tasks:
+    # 1. Atualiza as listas de pacotes do sistema operativo
     - name: Atualizar pacotes
       apt:
-        update_cache: yes
+        update_cache: yes # apt-get update (atualizar a lista de software disponível)
 
+    # 2. Instala os motores de execução essenciais para a orquestração de contentores
     - name: Instalar Docker e dependências
       apt:
         name: [docker.io, docker-compose-v2, python3-pip]
-        state: present
+        state: present # Garante que estes programas estão instalados
 
+    # 3. Mitigação do OOM Killer: Criação dinâmica de espaço de paginação
     - name: Configurar Swap (4GB)
       shell: |
         if [ ! -f /swapfile ]; then
@@ -20,40 +23,45 @@
           swapon /swapfile
         fi
       args:
-        executable: /bin/bash
+        executable: /bin/bash # Força o Ansible a usar o terminal bash (mais completo) em vez do sh padrão
 
+    # 4. Prepara o diretório raiz na máquina remota para receber os microsserviços
     - name: Garantir pasta da App
       file:
-        path: /home/ubuntu/app
-        state: directory
-        owner: ubuntu
+        path: /home/ubuntu/app # Onde vai ficar a aplicação
+        state: directory # Executa um mkdir -p
+        owner: ubuntu # Garante que o utilizador "ubuntu" é o dono da pasta
         group: ubuntu
 
+    # 5. Sincronização do código local com o servidor remoto (Deploy dos Ficheiros)
     - name: Copiar código fonte para o servidor
-      synchronize:
-        src: "{{ playbook_dir }}/../"
-        dest: /home/ubuntu/app/
-        recursive: yes
-        delete: yes
-        rsync_opts:
+      synchronize: # Módulo que usa a ferramenta super-rápida rsync por baixo dos panos
+        src: "{{ playbook_dir }}/../" # Vai para a raiz do repositório
+        dest: /home/ubuntu/app/ # O destino na máquina EC2
+        recursive: yes # copi todas as sub-pastas
+        delete: yes # apaga o que la esta e copia para ficar igual à origem
+        rsync_opts: # Exclir pastas. ocupa muito espaço desnecessário
           - "--exclude=.git"
           - "--exclude=terraform"
           - "--exclude=ansible"
           - "--exclude=target"
 
+    # 6. Garante recursivamente que todos os ficheiros copiados pertencem ao utilizador de execução
     - name: Ajustar permissões da pasta
       file:
-        path: /home/ubuntu/app
-        owner: ubuntu
+        path: /home/ubuntu/app # Onde vai ficar a aplicação
+        owner: ubuntu # Garante que o utilizador "ubuntu" é o dono da pasta
         group: ubuntu
-        recurse: yes
+        recurse: yes # aplica isto a todos os ficheiros dentro da pasta
 
+    # 7. Permite que o utilizador 'ubuntu' interaja com o daemon do Docker sem falhas de permissão
     - name: Dar permissão ao utilizador ubuntu para o Docker
       user:
         name: ubuntu
         groups: docker
         append: yes
 
+    # 8. Orquestra o arranque paralelo da aplicação via Docker Compose
     - name: Arrancar a App
       shell: docker compose up -d --build > docker_boot.log 2>&1
       args:

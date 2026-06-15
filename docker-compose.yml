@@ -1,92 +1,96 @@
 services:
-  # Zookeeper
+  # Zookeeper: O coordenador do Kafka (Pré-requisito da arquitetura clássica)
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.3.2
-    restart: always # A MAGIA 1
+    image: confluentinc/cp-zookeeper:7.3.2 # uso de imagem oficial
+    restart: always # Reinicia automaticamente caso o servidor vá abaixo
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
+      ZOOKEEPER_CLIENT_PORT: 2181 # porta interna onde ele vai escutar os pedidos
+      ZOOKEEPER_TICK_TIME: 2000 # ms para timeout
+    ports: # Portas Ec2 para contentor
       - "2181:2181"
 
-  # Kafka
+  # Apache Kafka: O Broker de Mensagens (Event-Driven Communication)
   kafka:
-    image: confluentinc/cp-kafka:7.3.2
-    restart: always # A MAGIA 2
-    depends_on:
+    image: confluentinc/cp-kafka:7.3.2 # uso de imagem oficial
+    restart: always # Reinicia automaticamente caso o servidor vá abaixo
+    depends_on: # Garantia que so inicia depois do zookeeper
       - zookeeper
     ports:
       - "9092:9092"
     environment:
-      KAFKA_HEAP_OPTS: -Xmx256M -Xms128M
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: -Xmx256M -Xms128M # restrição de memoria
+      KAFKA_BROKER_ID: 1 # identificador unico
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181 # ip do gerente
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092 # ip para escuta interna. 0.0.0.0 aceita todas as ligações
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092 # ip e porta para os clientes enviarem mensagens
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # redundancia de broker (só ha 1 broker, logo tem que ser 1)
 
+  # Serviço de Encomendas
   order-service:
-    build:
+    build: # contruir a imagem do 0
       context: ./order-service
       dockerfile: Dockerfile
-    image: app-order-service
-    restart: always
+    image: app-order-service # output de imagem
+    restart: always # Reinicia automaticamente caso o servidor vá abaixo
     environment:
-      - JAVA_OPTS=-Xms128m -Xmx256m
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
-      - SPRING_DATASOURCE_USERNAME=app_user
-      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD} # A MAGIA 3
-      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
-      - SERVER_PORT=8083
-      - SERVER_ADDRESS=0.0.0.0
-      - KAFKA_URL=kafka:9092
-    depends_on:
+      - JAVA_OPTS=-Xms128m -Xmx256m # Restrião de RAM
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres # Endereço remoto e dinâmico da base de dados RDS criada pelo Terraform na AWS.
+      - SPRING_DATASOURCE_USERNAME=app_user # user da BD
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD} # password da BD (O Docker lê a variável criada pelo pipeline no ficheiro .env temporário)
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver # indica que é para falar com PostgreSQL
+      - SERVER_PORT=8083 # porta que vai correr dentro do contentor
+      - SERVER_ADDRESS=0.0.0.0 # permite escutar pedidos de qualquer maquina na rede docker
+      - KAFKA_URL=kafka:9092 # indica o broker de mensagens para publicar a encomenda
+    depends_on: # Garantia que so inicia depois do kafta
       - kafka
 
+  # Serviço de Produtos
   product-service:
-    build:
+    build: # contruir a imagem do 0
       context: ./product-service
       dockerfile: Dockerfile
-    image: app-product-service
-    restart: always
+    image: app-product-service # output de imagem
+    restart: always # Reinicia automaticamente caso o servidor vá abaixo
     environment:
-      - JAVA_OPTS=-Xms128m -Xmx256m
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
-      - SPRING_DATASOURCE_USERNAME=app_user
-      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
-      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
-      - SERVER_PORT=8082
-      - SERVER_ADDRESS=0.0.0.0
-      - KAFKA_URL=kafka:9092
-    depends_on:
+      - JAVA_OPTS=-Xms128m -Xmx256m # Restrião de RAM
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres # Endereço remoto e dinâmico da base de dados RDS criada pelo Terraform na AWS.
+      - SPRING_DATASOURCE_USERNAME=app_user # user da BD
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD} # password da BD (O Docker lê a variável criada pelo pipeline no ficheiro .env temporário)
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver # indica que é para falar com PostgreSQL
+      - SERVER_PORT=8082 # porta que vai correr dentro do contentor
+      - SERVER_ADDRESS=0.0.0.0 # permite escutar pedidos de qualquer maquina na rede docker
+      - KAFKA_URL=kafka:9092 # indica o broker de mensagens para publicar a encomenda
+    depends_on: # Garantia que so inicia depois do kafta
       - kafka
 
+  # Serviço de Utilizadores
   user-service:
-    build:
+    build: # contruir a imagem do 0
       context: ./user-service
       dockerfile: Dockerfile
-    image: app-user-service
-    restart: always
+    image: app-user-service # output de imagem
+    restart: always # Reinicia automaticamente caso o servidor vá abaixo
     environment:
-      - JAVA_OPTS=-Xms128m -Xmx256m
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres
-      - SPRING_DATASOURCE_USERNAME=app_user
-      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
-      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
-      - SERVER_PORT=8081
-      - SERVER_ADDRESS=0.0.0.0
-      - LOGGING_LEVEL_ROOT=DEBUG
+      - JAVA_OPTS=-Xms128m -Xmx256m # Restrião de RAM
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://projeto-final-db-tf.c87oyyuuqyrd.us-east-1.rds.amazonaws.com:5432/postgres # Endereço remoto e dinâmico da base de dados RDS criada pelo Terraform na AWS.
+      - SPRING_DATASOURCE_USERNAME=app_user # user da BD
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD} # password da BD (O Docker lê a variável criada pelo pipeline no ficheiro .env temporário)
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver # indica que é para falar com PostgreSQL
+      - SERVER_PORT=8081 # porta que vai correr dentro do contentor
+      - SERVER_ADDRESS=0.0.0.0 # permite escutar pedidos de qualquer maquina na rede docker
+      - LOGGING_LEVEL_ROOT=DEBUG # Imprime logs mais detalhados no terminal do Docker
 
+  # API Gateway: O Ponto Único de Entrada
   api-gateway:
-    build:
+    build: # contruir a imagem do 0
       context: ./api-gateway
       dockerfile: Dockerfile
-    restart: always
-    ports:
-      - "80:8080"
-    depends_on:
+    restart: always # Reinicia automaticamente caso o servidor vá abaixo
+    ports:          # DEFESA: Este é o ÚNICO serviço que expõe a sua porta para a máquina EC2 (Host).
+      - "80:8080"   # O tráfego da rua chega à porta 80 da EC2, e o Docker atira-o para a porta 8080 deste contentor.
+    depends_on:  # Garantia que so inicia depois dos outros serviços
       - user-service
       - product-service
       - order-service
     environment:
-      - JAVA_OPTS=-Xms128m -Xmx256m
+      - JAVA_OPTS=-Xms128m -Xmx256m # Restrição de RAM

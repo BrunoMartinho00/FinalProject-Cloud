@@ -9,7 +9,7 @@ jobs:
     name: Terraform Destroy
     runs-on: ubuntu-latest
     
-    # Se usas autenticação OIDC para a AWS, precisas destas permissões:
+    # Segurança OIDC: Permite obter um token temporário em vez de usar chaves estáticas.
     permissions:
       id-token: write
       contents: read
@@ -18,11 +18,12 @@ jobs:
       run:
         working-directory: ./terraform
 
+    # Fazer o download do código
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # IMPORTANTE: Copia este passo EXATAMENTE igual ao que tens no teu deploy.yml
+      # Assume permissões temporárias na AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -32,12 +33,13 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
+
       - name: Terraform Init
-        run: terraform init
+        run: terraform init # Liga-se ao ficheiro de estado remoto (S3)
 
       - name: Terraform Destroy
-        run: terraform destroy -auto-approve
-        # Passa as variáveis que o teu Terraform exige, igual ao deploy.yml
+        run: terraform destroy -auto-approve # Destrói tudo automaticamente (sem prompt humano)
+        # Injeção segura das variáveis necessárias para a destruição
         env:
           TF_VAR_aws_region: "us-east-1"
           TF_VAR_key_name: "projeto-final-key"

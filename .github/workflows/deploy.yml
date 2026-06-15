@@ -1,27 +1,26 @@
 name: Deploy Infra & Application
 
+# gatilho
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - '.gitignore'
+  workflow_dispatch: 
 
 jobs:
   deploy:
     name: Terraform Apply & Ansible Deploy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # O GitHub aluga uma máquina virtual temporária com o Ubuntu mais recente para correr os passos
 
     steps:
+      # Fazer o download do nosso código
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      # Em vez de ter a password escrita no código, o pipeline lê a password secreta
+      # do cofre do GitHub e cria o ficheiro '.env' dinamicamente para o Docker Compose usar
       - name: Inject DB Password (.env)
         run: |
           echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" > .env
 
+      # Configuração do acesso seguro à AWS injetando as chaves escondidas nos GitHub Secrets
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -29,17 +28,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      # Instala o programa Terraform dentro da máquina temporária do GitHub
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_wrapper: false
 
+      # Inicia o Terraform e aplica o código
       - name: Terraform Init & Apply
         run: |
           cd terraform
           terraform init
           terraform apply -auto-approve
         
+      # Pergunta ao Terraform qual foi o IP público que a AWS acabou de dar à máquina EC2.
+      # Depois, guarda esse IP numa variável de ambiente interna ($GITHUB_ENV) para o passo seguinte.
       - name: Extract EC2 IP from Terraform
         id: tf_output
         run: |
@@ -47,6 +50,9 @@ jobs:
           EC2_IP=$(terraform output -raw ec2_public_ip)
           echo "ec2_ip=$EC2_IP" >> $GITHUB_ENV
 
+      # 1. Cria o ficheiro com a chave SSH (.pem) a partir dos secrets do GitHub.
+      # 2. chmod 600: Restringe as permissões da chave SSH (o SSH bloqueia chaves abertas ao público).
+      # 3. Cria o ficheiro de inventário ('inventory.ini') do ZERO, inserindo o IP real extraído no passo anterior.
       - name: Setup SSH Key and Inventory
         run: |
           mkdir -p terraform
@@ -58,12 +64,14 @@ jobs:
           echo "[ec2]" > ansible/inventory.ini
           echo "${{ env.ec2_ip }} ansible_user=ubuntu ansible_ssh_private_key_file=../terraform/projeto-final-key.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> ansible/inventory.ini
 
+      # Instala o próprio motor do Ansible na máquina temporária do GitHub Actions.
       - name: Install Ansible
         run: sudo apt-get update && sudo apt-get install -y ansible
 
+      # Executar a Instalação e Arrancar a App
       - name: Run Ansible Playbook
         env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
+          ANSIBLE_HOST_KEY_CHECKING: "False" # para o terminal não encravar a perguntar se confiamos na máquina de destino
         run: |
           cd ansible
           # Pausa de 30s para garantir que a EC2 recém-criada ligou o serviço SSH
